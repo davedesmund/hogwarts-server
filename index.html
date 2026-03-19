@@ -9,8 +9,11 @@
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'Cinzel', serif; }
         #video-container { position: relative; width: 100vw; height: 100vh; background: #111; }
-        video#webcam { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
-        canvas#ar-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
+        
+        /* THE FIX: Forcefully override any cached mirroring */
+        video#webcam { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; transform: none !important; }
+        canvas#ar-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; transform: none !important; }
+        
         .ui-layer { position: absolute; bottom: 30px; left: 0; width: 100%; display: flex; flex-direction: column; align-items: center; z-index: 10; pointer-events: none; }
         #debug-log { position: absolute; top: 10px; left: 10px; font-family: monospace; font-size: 10px; color: #0f0; background: rgba(0,0,0,0.7); padding: 5px; z-index: 100; max-width: 80%; pointer-events: none; border-radius: 4px; border: 1px solid #050; }
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap');
@@ -25,7 +28,7 @@
         import ReactDOM from 'https://esm.sh/react-dom@18.2.0/client';
         import { FaceLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.mjs';
 
-        // IMPORTANT: Replace with your Render URL after deployment
+        // THE FIX: Ensure this is EXACTLY your Render URL. No HTTP, no :10000, no trailing slashes.
         const SERVER_URL = "https://hogwarts-server.onrender.com"; 
 
         const debug = (msg) => {
@@ -33,6 +36,8 @@
             if (el) el.innerText = `Debug: ${msg}`;
             console.log(msg);
         };
+        
+        // ... (Keep the rest of your React code exactly the same, starting from const App = () => { )
 
         const App = () => {
             const [hasConsent, setHasConsent] = useState(false);
