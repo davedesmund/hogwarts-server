@@ -10,7 +10,6 @@
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'Cinzel', serif; }
         #video-container { position: relative; width: 100vw; height: 100vh; background: #111; }
         
-        /* Camera is completely normal, no flipping or mirroring */
         video#webcam { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; transform: none !important; }
         canvas#ar-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; transform: none !important; }
         
@@ -40,7 +39,7 @@
         const App = () => {
             const [hasConsent, setHasConsent] = useState(false);
             const [status, setStatus] = useState("Idle");
-            const [previewImg, setPreviewImg] = useState(null); // ✨ NEW: Visual Debugger
+            const [previewImg, setPreviewImg] = useState(null); 
             
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
@@ -48,12 +47,19 @@
             const sceneRef = useRef(null);
             const portraitsRef = useRef(new Map()); 
             const requestRef = useRef();
+            
+            // ✨ NEW: Tracks how long a face has been in the frame
+            const trackingRef = useRef(new Map()); 
 
             useEffect(() => { if (hasConsent) initApp(); }, [hasConsent]);
 
             const initApp = async () => {
                 try {
                     debug("Loading Vision...");
+                    
+                    // ✨ NEW: Wake up the Render server in the background so it's ready!
+                    fetch(`${SERVER_URL}/status/wakeup`).catch(() => {});
+
                     const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
                     landmarkerRef.current = await FaceLandmarker.createFromOptions(vision, {
                         baseOptions: { 
@@ -63,7 +69,6 @@
                         runningMode: "VIDEO", numFaces: 1
                     });
 
-                    // Using environment camera (back camera) for scanning portraits
                     const stream = await navigator.mediaDevices.getUserMedia({ 
                         video: { facingMode: "environment", width: 1280, height: 720 } 
                     });
@@ -98,18 +103,46 @@
                 requestRef.current = requestAnimationFrame(predictLoop);
             };
 
+            // ✨ NEW: Stabilized Target Lock Logic
             const processLandmarks = (allLandmarks) => {
+                const now = performance.now();
+                const visibleFaces = new Set();
+
                 allLandmarks.forEach((landmarks, index) => {
                     const faceId = `face_${index}`;
+                    visibleFaces.add(faceId);
                     const width = landmarks[454].x - landmarks[234].x;
                     
-                    // Trigger if the face takes up a good portion of the screen
+                    // Is the face large enough to scan?
                     if (width > 0.20 && !portraitsRef.current.has(faceId)) {
-                        triggerMagic(faceId, landmarks);
+                        
+                        if (!trackingRef.current.has(faceId)) {
+                            // 1. We just spotted a new face. Start the timer.
+                            trackingRef.current.set(faceId, now);
+                            setStatus("Targeting...");
+                        } else {
+                            // 2. We are tracking it. Has it been stable for 1.5 seconds?
+                            const startTime = trackingRef.current.get(faceId);
+                            if (now - startTime > 1500) {
+                                // FIRE! The camera has been steady for 1.5s.
+                                trackingRef.current.delete(faceId);
+                                triggerMagic(faceId, landmarks);
+                            } else {
+                                setStatus("Hold steady...");
+                            }
+                        }
                     } else if (portraitsRef.current.has(faceId)) {
                         updatePortraitPosition(faceId, landmarks);
+                    } else {
+                        // Face is too small, cancel the lock-on
+                        trackingRef.current.delete(faceId);
                     }
                 });
+
+                // Clean up tracking if the face leaves the screen entirely
+                for (const key of trackingRef.current.keys()) {
+                    if (!visibleFaces.has(key)) trackingRef.current.delete(key);
+                }
             };
 
             const triggerMagic = async (faceId, landmarks) => {
@@ -117,7 +150,7 @@
                 setStatus("Capturing...");
 
                 try {
-                    debug("1. Setting up canvas...");
+                    debug("1. Snapping photo...");
                     const captureCanvas = document.createElement('canvas');
                     const ctx = captureCanvas.getContext('2d');
                     
@@ -127,29 +160,25 @@
                     captureCanvas.width = vW * scale;
                     captureCanvas.height = vH * scale;
 
-                    debug("2. Drawing camera frame...");
                     ctx.drawImage(videoRef.current, 0, 0, captureCanvas.width, captureCanvas.height);
-                    
-                    debug("3. Encoding to Base64...");
                     const base64Image = captureCanvas.toDataURL('image/jpeg', 0.85);
+                    
                     setPreviewImg(base64Image); 
 
-                    // This will print the first 25 characters of your URL to make sure it's right
-                    debug(`4. Fetching: ${SERVER_URL.substring(0, 25)}...`);
-                    
+                    debug("2. Sending to Ministry...");
                     const response = await fetch(`${SERVER_URL}/animate`, { 
                         method: 'POST', 
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ image: base64Image }) 
                     });
                     
-                    debug("5. Reading Ministry response...");
+                    debug("3. Reading response...");
                     const data = await response.json();
                     
                     if (data.videoUrl) {
                         finishMagic(faceId, data.videoUrl, landmarks);
                     } else if (data.job_id) {
-                        debug(`6. Job Queued: ${data.job_id}`);
+                        debug(`4. Job Queued: ${data.job_id}`);
                         pollStatus(faceId, data.job_id, landmarks);
                     } else {
                         throw new Error(data.error || "Connection Stalled");
@@ -181,7 +210,7 @@
                         setTimeout(() => pollStatus(faceId, jobId, landmarks), 3000);
                     }
                 } catch (e) {
-                    debug(`Link Fail: ${e.message}`);
+                    debug(`Poll Fail: ${e.message}`);
                     portraitsRef.current.delete(faceId);
                 }
             };
@@ -190,7 +219,7 @@
                 debug("Magic Bound!");
                 createPortraitMesh(id, url, landmarks);
                 setStatus("Living");
-                setPreviewImg(null); // Hide preview when done
+                setPreviewImg(null); 
             };
 
             const createPortraitMesh = (id, url, landmarks) => {
@@ -229,7 +258,6 @@
                 React.createElement('video', { id: "webcam", ref: videoRef, playsInline: true, muted: true }),
                 React.createElement('canvas', { id: "ar-canvas", ref: canvasRef }),
                 
-                /* THE NEW VISUAL DEBUGGER - Shows the exact image sent to Segmind */
                 previewImg && React.createElement('img', { 
                     src: previewImg, 
                     className: "absolute top-4 right-4 w-24 border-2 border-amber-500 rounded z-50 shadow-lg" 
