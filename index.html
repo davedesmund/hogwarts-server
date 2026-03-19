@@ -137,8 +137,17 @@
                     }
                 } catch (e) {
                     debug(`Magic Fail: ${e.message}`);
-                    portraitsRef.current.delete(faceId);
-                    setStatus("Retrying...");
+                    // ✨ NEW: Mark as failed instead of deleting it immediately.
+                    // This stops the infinite spam loop.
+                    portraitsRef.current.set(faceId, { status: "failed" });
+                    setStatus("Spell Fizzled");
+                    
+                    // Allow trying again after 5 seconds
+                    setTimeout(() => {
+                        if (portraitsRef.current.get(faceId)?.status === "failed") {
+                            portraitsRef.current.delete(faceId);
+                        }
+                    }, 5000);
                 }
             };
 
