@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Hogwarts Living Portraits v5</title>
+    <title>Hogwarts Living Portraits v6</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
@@ -13,13 +13,13 @@
         video#webcam { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; transform: none !important; }
         canvas#ar-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; transform: none !important; }
         
-        .ui-layer { position: absolute; bottom: 30px; left: 0; width: 100%; display: flex; flex-direction: column; align-items: center; z-index: 10; pointer-events: none; }
+        .ui-layer { position: absolute; bottom: 30px; left: 0; width: 100%; display: flex; flex-direction: column; align-items: center; z-index: 20; pointer-events: none; }
         #debug-log { position: absolute; top: 10px; left: 10px; font-family: monospace; font-size: 10px; color: #0f0; background: rgba(0,0,0,0.8); padding: 8px; z-index: 100; max-width: 70%; pointer-events: none; border-radius: 4px; border: 1px solid #050; }
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap');
     </style>
 </head>
 <body>
-    <div id="debug-log">Debug: v5.0 Ready</div>
+    <div id="debug-log">Debug: v6.0 Ready</div>
     <div id="root"></div>
 
     <script type="module">
@@ -36,7 +36,6 @@
             console.log(msg);
         };
 
-        // Bypassing React state for instant, lag-free UI updates
         const updateStatus = (msg) => {
             const el = document.getElementById('status-text');
             if (el) el.innerText = msg;
@@ -59,7 +58,6 @@
             const initApp = async () => {
                 try {
                     debug("Waking Server...");
-                    // Ping server to wake it up early
                     fetch(`${SERVER_URL}/status/wakeup`).catch(() => {});
 
                     const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
@@ -114,13 +112,13 @@
                     visibleFaces.add(faceId);
                     const width = landmarks[454].x - landmarks[234].x;
                     
-                    if (width > 0.20 && !portraitsRef.current.has(faceId)) {
+                    // Slightly lower threshold since they are aiming
+                    if (width > 0.15 && !portraitsRef.current.has(faceId)) {
                         if (!trackingRef.current.has(faceId)) {
                             trackingRef.current.set(faceId, now);
                             updateStatus("Targeting...");
                         } else {
                             const startTime = trackingRef.current.get(faceId);
-                            // Give the user 1.5 seconds to hold the phone perfectly still
                             if (now - startTime > 1500) {
                                 trackingRef.current.delete(faceId);
                                 triggerMagic(faceId, landmarks);
@@ -146,21 +144,27 @@
                 updateStatus("Capturing...");
 
                 try {
-                    debug("1. Snapping steady photo...");
+                    debug("1. Taking perfect square snapshot...");
                     const captureCanvas = document.createElement('canvas');
                     const ctx = captureCanvas.getContext('2d');
                     
                     const vW = videoRef.current.videoWidth;
                     const vH = videoRef.current.videoHeight;
-                    const scale = 768 / Math.max(vW, vH);
-                    captureCanvas.width = vW * scale;
-                    captureCanvas.height = vH * scale;
+                    
+                    // --- THE FIX: The Perfect Center Square ---
+                    const size = Math.min(vW, vH);
+                    const startX = (vW - size) / 2;
+                    const startY = (vH - size) / 2;
 
-                    ctx.drawImage(videoRef.current, 0, 0, captureCanvas.width, captureCanvas.height);
+                    captureCanvas.width = 512;
+                    captureCanvas.height = 512;
+
+                    ctx.drawImage(videoRef.current, startX, startY, size, size, 0, 0, 512, 512);
                     const base64Image = captureCanvas.toDataURL('image/jpeg', 0.85);
+                    
                     setPreviewImg(base64Image); 
 
-                    debug("2. Sending... (Server may take 60s to wake up)");
+                    debug("2. Sending to Ministry...");
                     const response = await fetch(`${SERVER_URL}/animate`, { 
                         method: 'POST', 
                         headers: { 'Content-Type': 'application/json' },
@@ -253,14 +257,21 @@
                 React.createElement('video', { id: "webcam", ref: videoRef, playsInline: true, muted: true }),
                 React.createElement('canvas', { id: "ar-canvas", ref: canvasRef }),
                 
+                /* THE NEW UI: The Scanner Shadow */
+                React.createElement('div', { className: "absolute top-0 left-0 w-full h-full z-15 pointer-events-none flex items-center justify-center overflow-hidden" },
+                    React.createElement('div', { className: "w-full max-w-[100vh] max-h-[100vw] aspect-square border-2 border-amber-400 shadow-[0_0_0_4000px_rgba(0,0,0,0.85)] flex items-end justify-center pb-4" },
+                         React.createElement('p', { className: "text-amber-400/70 uppercase tracking-[0.3em] text-[10px] font-bold" }, "Align Face in Scanner")
+                    )
+                ),
+
                 previewImg && React.createElement('img', { 
                     src: previewImg, 
-                    className: "absolute top-4 right-4 w-24 border-2 border-amber-500 rounded z-50 shadow-lg" 
+                    className: "absolute top-12 right-4 w-24 border-2 border-amber-500 rounded z-50 shadow-lg" 
                 }),
 
                 React.createElement('div', { className: "ui-layer" },
-                    React.createElement('div', { className: "bg-black/80 px-4 py-2 rounded border border-amber-800" },
-                        React.createElement('p', { id: "status-text", className: "text-amber-200 text-xs tracking-widest font-bold" }, "Idle")
+                    React.createElement('div', { className: "bg-black/90 px-6 py-2 rounded-full border border-amber-700 shadow-lg" },
+                        React.createElement('p', { id: "status-text", className: "text-amber-300 text-sm tracking-widest font-bold" }, "Idle")
                     )
                 )
             );
