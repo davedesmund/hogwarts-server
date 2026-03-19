@@ -9,6 +9,38 @@ app.use(express.json({ limit: '50mb' }));
 
 app.get('/status/wakeup', (req, res) => res.send("Awake"));
 
+// --- PULSE CHECK ROUTE ---
+app.get('/test-segmind', async (req, res) => {
+    try {
+        const API_KEY = process.env.SEGMIND_API_KEY?.trim();
+        if (!API_KEY) return res.send("Error: API Key missing in Render Environment.");
+
+        console.log("Running Pulse Check...");
+
+        const response = await fetch("https://api.segmind.com/v1/live-portrait", {
+            method: 'POST',
+            headers: { 
+                'x-api-key': API_KEY, 
+                'Content-Type': 'application/json' 
+            },
+            body: JSON.stringify({
+                // Sending a clean, public portrait from Unsplash
+                input_image: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=512&h=512&fit=crop", 
+                driving_video: "https://segmind-sd-models.s3.amazonaws.com/liveportrait/driving_video.mp4",
+                stitch: true,
+                live_portrait_multiplier: 1.0,
+                base64: false // Tell them it is a standard URL
+            })
+        });
+
+        const data = await response.json();
+        res.json({ http_status: response.status, segmind_response: data });
+
+    } catch (err) {
+        res.json({ error: err.message });
+    }
+});
+
 app.post('/animate', async (req, res) => {
     try {
         const { image } = req.body;
