@@ -10,12 +10,12 @@
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'Cinzel', serif; }
         #video-container { position: relative; width: 100vw; height: 100vh; background: #111; }
         
-        /* THE FIX: Forcefully override any cached mirroring */
+        /* Camera is completely normal, no flipping or mirroring */
         video#webcam { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; transform: none !important; }
         canvas#ar-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; transform: none !important; }
         
         .ui-layer { position: absolute; bottom: 30px; left: 0; width: 100%; display: flex; flex-direction: column; align-items: center; z-index: 10; pointer-events: none; }
-        #debug-log { position: absolute; top: 10px; left: 10px; font-family: monospace; font-size: 10px; color: #0f0; background: rgba(0,0,0,0.7); padding: 5px; z-index: 100; max-width: 80%; pointer-events: none; border-radius: 4px; border: 1px solid #050; }
+        #debug-log { position: absolute; top: 10px; left: 10px; font-family: monospace; font-size: 10px; color: #0f0; background: rgba(0,0,0,0.7); padding: 5px; z-index: 100; max-width: 60%; pointer-events: none; border-radius: 4px; border: 1px solid #050; }
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap');
     </style>
 </head>
@@ -28,7 +28,7 @@
         import ReactDOM from 'https://esm.sh/react-dom@18.2.0/client';
         import { FaceLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.mjs';
 
-        // THE FIX: Ensure this is EXACTLY your Render URL. No HTTP, no :10000, no trailing slashes.
+        // IMPORTANT: Ensure this is your exact Render URL
         const SERVER_URL = "https://hogwarts-server.onrender.com"; 
 
         const debug = (msg) => {
@@ -36,12 +36,12 @@
             if (el) el.innerText = `Debug: ${msg}`;
             console.log(msg);
         };
-        
-        // ... (Keep the rest of your React code exactly the same, starting from const App = () => { )
 
         const App = () => {
             const [hasConsent, setHasConsent] = useState(false);
             const [status, setStatus] = useState("Idle");
+            const [previewImg, setPreviewImg] = useState(null); // ✨ NEW: Visual Debugger
+            
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
             const landmarkerRef = useRef(null);
@@ -53,7 +53,7 @@
 
             const initApp = async () => {
                 try {
-                    debug("Loading Vision Assets...");
+                    debug("Loading Vision...");
                     const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
                     landmarkerRef.current = await FaceLandmarker.createFromOptions(vision, {
                         baseOptions: { 
@@ -63,6 +63,7 @@
                         runningMode: "VIDEO", numFaces: 1
                     });
 
+                    // Using environment camera (back camera) for scanning portraits
                     const stream = await navigator.mediaDevices.getUserMedia({ 
                         video: { facingMode: "environment", width: 1280, height: 720 } 
                     });
@@ -102,7 +103,8 @@
                     const faceId = `face_${index}`;
                     const width = landmarks[454].x - landmarks[234].x;
                     
-                    if (width > 0.22 && !portraitsRef.current.has(faceId)) {
+                    // Trigger if the face takes up a good portion of the screen
+                    if (width > 0.20 && !portraitsRef.current.has(faceId)) {
                         triggerMagic(faceId, landmarks);
                     } else if (portraitsRef.current.has(faceId)) {
                         updatePortraitPosition(faceId, landmarks);
@@ -117,34 +119,27 @@
 
                 try {
                     const captureCanvas = document.createElement('canvas');
-                    captureCanvas.width = 512; captureCanvas.height = 512;
                     const ctx = captureCanvas.getContext('2d');
                     
+                    // --- THE FIX: Full Frame, Proportional Scale ---
                     const vW = videoRef.current.videoWidth;
                     const vH = videoRef.current.videoHeight;
                     
-                    // --- THE SMART CROP FIX ---
-                    // 1. Find the exact pixel coordinates of the nose (landmark 1)
-                    const noseX = landmarks[1].x * vW;
-                    const noseY = landmarks[1].y * vH;
+                    // Scale down so the longest side is 768px (keeps upload fast)
+                    const scale = 768 / Math.max(vW, vH);
+                    const finalW = vW * scale;
+                    const finalH = vH * scale;
 
-                    // 2. Make the crop size a perfect square based on screen width
-                    const cropSize = Math.min(vW, vH);
+                    captureCanvas.width = finalW;
+                    captureCanvas.height = finalH;
 
-                    // 3. Center the square exactly on the nose
-                    let startX = noseX - (cropSize / 2);
-                    let startY = noseY - (cropSize / 2);
-
-                    // 4. Safety Check: Keep the crop box inside the video boundaries
-                    if (startX < 0) startX = 0;
-                    if (startY < 0) startY = 0;
-                    if (startX + cropSize > vW) startX = vW - cropSize;
-                    if (startY + cropSize > vH) startY = vH - cropSize;
-
-                    // Draw the face-centered square onto our 512x512 canvas
-                    ctx.drawImage(videoRef.current, startX, startY, cropSize, cropSize, 0, 0, 512, 512);
+                    // Draw the entire frame exactly as the camera sees it
+                    ctx.drawImage(videoRef.current, 0, 0, finalW, finalH);
                     
                     const base64Image = captureCanvas.toDataURL('image/jpeg', 0.85);
+                    
+                    // Show the user what we are sending!
+                    setPreviewImg(base64Image); 
 
                     const response = await fetch(`${SERVER_URL}/animate`, { 
                         method: 'POST', 
@@ -198,6 +193,7 @@
                 debug("Magic Bound!");
                 createPortraitMesh(id, url, landmarks);
                 setStatus("Living");
+                setPreviewImg(null); // Hide preview when done
             };
 
             const createPortraitMesh = (id, url, landmarks) => {
@@ -219,7 +215,6 @@
                 const data = portraitsRef.current.get(id);
                 if (!data || !data.mesh) return;
                 
-                // Flip X for selfie view if necessary, otherwise use normal mapping
                 const targetX = (landmarks[1].x - 0.5) * 10;
                 const targetY = -(landmarks[1].y - 0.5) * 10;
                 
@@ -230,13 +225,19 @@
 
             if (!hasConsent) return React.createElement('div', { className: "h-full bg-black flex flex-col items-center justify-center p-10 text-amber-100 text-center" },
                 React.createElement('h1', { className: "text-3xl mb-8 tracking-widest font-bold" }, "THE DAILY PROPHET"),
-                React.createElement('p', { className: "mb-8 text-sm opacity-70 italic" }, "Point your device at a portrait to bring it to life."),
                 React.createElement('button', { onClick: () => setHasConsent(true), className: "border-2 border-amber-400 px-10 py-4 rounded-full font-bold uppercase tracking-widest active:bg-amber-400 active:text-black transition-colors" }, "REVELIO")
             );
 
             return React.createElement('div', { id: "video-container" },
                 React.createElement('video', { id: "webcam", ref: videoRef, playsInline: true, muted: true }),
                 React.createElement('canvas', { id: "ar-canvas", ref: canvasRef }),
+                
+                /* THE NEW VISUAL DEBUGGER - Shows the exact image sent to Segmind */
+                previewImg && React.createElement('img', { 
+                    src: previewImg, 
+                    className: "absolute top-4 right-4 w-24 border-2 border-amber-500 rounded z-50 shadow-lg" 
+                }),
+
                 React.createElement('div', { className: "ui-layer" },
                     React.createElement('div', { className: "bg-black/80 px-4 py-2 rounded border border-amber-800" },
                         React.createElement('p', { className: "text-amber-200 text-xs tracking-widest font-bold" }, status)
