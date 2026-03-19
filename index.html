@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Hogwarts Living Portraits</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'Cinzel', serif; }
+        #video-container { position: relative; width: 100vw; height: 100vh; background: #111; }
+        video#webcam { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; transform: scaleX(-1); }
+        canvas#ar-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
+        .ui-layer { position: absolute; bottom: 30px; left: 0; width: 100%; display: flex; flex-direction: column; align-items: center; z-index: 10; pointer-events: none; }
+        #debug-log { position: absolute; top: 10px; left: 10px; font-family: monospace; font-size: 10px; color: #0f0; background: rgba(0,0,0,0.7); padding: 5px; z-index: 100; max-width: 80%; pointer-events: none; border-radius: 4px; border: 1px solid #050; }
+        @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap');
+    </style>
+</head>
+<body>
+    <div id="debug-log">Debug: Ready for Casting</div>
+    <div id="root"></div>
+
+    <script type="module">
+        import React, { useState, useEffect, useRef } from 'https://esm.sh/react@18.2.0';
+        import ReactDOM from 'https://esm.sh/react-dom@18.2.0/client';
+        import { FaceLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.mjs';
+
+        // IMPORTANT: Replace with your Render URL after deployment
+        const SERVER_URL = "https://hogwarts-server.onrender.com"; 
+
+        const debug = (msg) => {
+            const el = document.getElementById('debug-log');
+            if (el) el.innerText = `Debug: ${msg}`;
+            console.log(msg);
+        };
+
+        const App = () => {
+            const [hasConsent, setHasConsent] = useState(false);
+            const [status, setStatus] = useState("Idle");
+            const videoRef = useRef(null);
+            const canvasRef = useRef(null);
+            const landmarkerRef = useRef(null);
+            const sceneRef = useRef(null);
+            const portraitsRef = useRef(new Map()); 
+            const requestRef = useRef();
+
+            useEffect(() => { if (hasConsent) initApp(); }, [hasConsent]);
+
+            const initApp = async () => {
+                try {
+                    debug("Loading Vision Assets...");
+                    const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
+                    landmarkerRef.current = await FaceLandmarker.createFromOptions(vision, {
+                        baseOptions: { 
+                            modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task", 
+                            delegate: "GPU" 
+                        },
+                        runningMode: "VIDEO", numFaces: 1
+                    });
+
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { facingMode: "environment", width: 1280, height: 720 } 
+                    });
+                    
+                    videoRef.current.srcObject = stream;
+                    videoRef.current.onloadedmetadata = () => {
+                        videoRef.current.play();
+                        initThree();
+                        requestRef.current = requestAnimationFrame(predictLoop);
+                        setStatus("Magic Active");
+                        debug("Sight Online");
+                    };
+                } catch (err) { debug(`Init Error: ${err.message}`); }
+            };
+
+            const initThree = () => {
+                const scene = new THREE.Scene();
+                const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+                camera.position.z = 5;
+                const renderer = new THREE.WebGLRenderer({ canvas: canvasRef.current, alpha: true, antialias: true });
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                sceneRef.current = { scene, camera, renderer };
+            };
+
+            const predictLoop = async () => {
+                if (!videoRef.current || !landmarkerRef.current) return;
+                if (videoRef.current.readyState >= 2) {
+                    const results = landmarkerRef.current.detectForVideo(videoRef.current, performance.now());
+                    if (results && results.faceLandmarks) processLandmarks(results.faceLandmarks);
+                }
+                sceneRef.current.renderer.render(sceneRef.current.scene, sceneRef.current.camera);
+                requestRef.current = requestAnimationFrame(predictLoop);
+            };
+
+            const processLandmarks = (allLandmarks) => {
+                allLandmarks.forEach((landmarks, index) => {
+                    const faceId = `face_${index}`;
+                    const width = landmarks[454].x - landmarks[234].x;
+                    
+                    if (width > 0.22 && !portraitsRef.current.has(faceId)) {
+                        triggerMagic(faceId, landmarks);
+                    } else if (portraitsRef.current.has(faceId)) {
+                        updatePortraitPosition(faceId, landmarks);
+                    }
+                });
+            };
+
+            const triggerMagic = async (faceId, landmarks) => {
+                portraitsRef.current.set(faceId, { status: "loading" });
+                debug("Casting Spell...");
+                setStatus("Capturing...");
+
+                try {
+                    const captureCanvas = document.createElement('canvas');
+                    captureCanvas.width = 512; captureCanvas.height = 512;
+                    const ctx = captureCanvas.getContext('2d');
+                    ctx.drawImage(videoRef.current, 0, 0, 512, 512);
+                    
+                    // JSON Handshake Strategy
+                    const base64Image = captureCanvas.toDataURL('image/jpeg', 0.85);
+
+                    const response = await fetch(`${SERVER_URL}/animate`, { 
+                        method: 'POST', 
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ image: base64Image }) 
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.videoUrl) {
+                        finishMagic(faceId, data.videoUrl, landmarks);
+                    } else if (data.job_id) {
+                        debug(`Job Queued: ${data.job_id}`);
+                        pollStatus(faceId, data.job_id, landmarks);
+                    } else {
+                        throw new Error(data.error || "Connection Stalled");
+                    }
+                } catch (e) {
+                    debug(`Magic Fail: ${e.message}`);
+                    portraitsRef.current.delete(faceId);
+                    setStatus("Retrying...");
+                }
+            };
+
+            const pollStatus = async (faceId, jobId, landmarks) => {
+                setStatus("Manifesting...");
+                try {
+                    const response = await fetch(`${SERVER_URL}/status/${jobId}`);
+                    const data = await response.json();
+
+                    if (data.status === 1 && data.videoUrl) {
+                        finishMagic(faceId, data.videoUrl, landmarks);
+                    } else if (data.status === 3) {
+                        throw new Error("Portrait Refused");
+                    } else {
+                        setTimeout(() => pollStatus(faceId, jobId, landmarks), 3000);
+                    }
+                } catch (e) {
+                    debug(`Link Fail: ${e.message}`);
+                    portraitsRef.current.delete(faceId);
+                }
+            };
+
+            const finishMagic = (id, url, landmarks) => {
+                debug("Magic Bound!");
+                createPortraitMesh(id, url, landmarks);
+                setStatus("Living");
+            };
+
+            const createPortraitMesh = (id, url, landmarks) => {
+                const video = document.createElement('video');
+                video.src = url;
+                video.loop = true; video.muted = true; video.playsInline = true; video.crossOrigin = "anonymous";
+                video.play();
+                const texture = new THREE.VideoTexture(video);
+                const mesh = new THREE.Mesh(
+                    new THREE.PlaneGeometry(1, 1.4), 
+                    new THREE.MeshBasicMaterial({ map: texture, transparent: true, opacity: 0.95 })
+                );
+                sceneRef.current.scene.add(mesh);
+                portraitsRef.current.set(id, { mesh, status: "active", video });
+                updatePortraitPosition(id, landmarks);
+            };
+
+            const updatePortraitPosition = (id, landmarks) => {
+                const data = portraitsRef.current.get(id);
+                if (!data || !data.mesh) return;
+                
+                // Flip X for selfie view if necessary, otherwise use normal mapping
+                const targetX = (landmarks[1].x - 0.5) * 10;
+                const targetY = -(landmarks[1].y - 0.5) * 10;
+                
+                data.mesh.position.lerp(new THREE.Vector3(targetX, targetY, 0.2), 0.2);
+                const w = Math.abs(landmarks[454].x - landmarks[234].x) * 12;
+                data.mesh.scale.set(w, w, 1);
+            };
+
+            if (!hasConsent) return React.createElement('div', { className: "h-full bg-black flex flex-col items-center justify-center p-10 text-amber-100 text-center" },
+                React.createElement('h1', { className: "text-3xl mb-8 tracking-widest font-bold" }, "THE DAILY PROPHET"),
+                React.createElement('p', { className: "mb-8 text-sm opacity-70 italic" }, "Point your device at a portrait to bring it to life."),
+                React.createElement('button', { onClick: () => setHasConsent(true), className: "border-2 border-amber-400 px-10 py-4 rounded-full font-bold uppercase tracking-widest active:bg-amber-400 active:text-black transition-colors" }, "REVELIO")
+            );
+
+            return React.createElement('div', { id: "video-container" },
+                React.createElement('video', { id: "webcam", ref: videoRef, playsInline: true, muted: true }),
+                React.createElement('canvas', { id: "ar-canvas", ref: canvasRef }),
+                React.createElement('div', { className: "ui-layer" },
+                    React.createElement('div', { className: "bg-black/80 px-4 py-2 rounded border border-amber-800" },
+                        React.createElement('p', { className: "text-amber-200 text-xs tracking-widest font-bold" }, status)
+                    )
+                )
+            );
+        };
+
+        ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+    </script>
+</body>
+</html>
