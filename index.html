@@ -9,8 +9,8 @@
     <style>
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; font-family: 'Cinzel', serif; }
         #video-container { position: relative; width: 100vw; height: 100vh; background: #111; }
-        video#webcam { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; transform: scaleX(-1); }
-        canvas#ar-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; transform: scaleX(-1); }
+        video#webcam { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
+        canvas#ar-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
         .ui-layer { position: absolute; bottom: 30px; left: 0; width: 100%; display: flex; flex-direction: column; align-items: center; z-index: 10; pointer-events: none; }
         #debug-log { position: absolute; top: 10px; left: 10px; font-family: monospace; font-size: 10px; color: #0f0; background: rgba(0,0,0,0.7); padding: 5px; z-index: 100; max-width: 80%; pointer-events: none; border-radius: 4px; border: 1px solid #050; }
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap');
@@ -115,25 +115,29 @@
                     captureCanvas.width = 512; captureCanvas.height = 512;
                     const ctx = captureCanvas.getContext('2d');
                     
-                    // --- 1. THE MIRROR FIX ---
-                    // Flip the internal canvas so the snapshot isn't backwards
-                    ctx.translate(512, 0);
-                    ctx.scale(-1, 1);
-                    
-                    // --- 2. THE PERFECT CROP FIX ---
-                    // Get the actual dimensions of the video feed
                     const vW = videoRef.current.videoWidth;
                     const vH = videoRef.current.videoHeight;
                     
-                    // Find the smallest side to make a perfect square
-                    const minSize = Math.min(vW, vH);
-                    
-                    // Calculate the exact center
-                    const startX = (vW - minSize) / 2;
-                    const startY = (vH - minSize) / 2;
+                    // --- THE SMART CROP FIX ---
+                    // 1. Find the exact pixel coordinates of the nose (landmark 1)
+                    const noseX = landmarks[1].x * vW;
+                    const noseY = landmarks[1].y * vH;
 
-                    // Draw only the perfectly proportioned, mirrored center square
-                    ctx.drawImage(videoRef.current, startX, startY, minSize, minSize, 0, 0, 512, 512);
+                    // 2. Make the crop size a perfect square based on screen width
+                    const cropSize = Math.min(vW, vH);
+
+                    // 3. Center the square exactly on the nose
+                    let startX = noseX - (cropSize / 2);
+                    let startY = noseY - (cropSize / 2);
+
+                    // 4. Safety Check: Keep the crop box inside the video boundaries
+                    if (startX < 0) startX = 0;
+                    if (startY < 0) startY = 0;
+                    if (startX + cropSize > vW) startX = vW - cropSize;
+                    if (startY + cropSize > vH) startY = vH - cropSize;
+
+                    // Draw the face-centered square onto our 512x512 canvas
+                    ctx.drawImage(videoRef.current, startX, startY, cropSize, cropSize, 0, 0, 512, 512);
                     
                     const base64Image = captureCanvas.toDataURL('image/jpeg', 0.85);
 
@@ -151,7 +155,6 @@
                         debug(`Job Queued: ${data.job_id}`);
                         pollStatus(faceId, data.job_id, landmarks);
                     } else {
-                        // Pass the exact error from the server to the screen
                         throw new Error(data.error || "Connection Stalled");
                     }
                 } catch (e) {
@@ -159,7 +162,6 @@
                     portraitsRef.current.set(faceId, { status: "failed" });
                     setStatus("Spell Fizzled");
                     
-                    // 5-second cooldown before trying this face again
                     setTimeout(() => {
                         if (portraitsRef.current.get(faceId)?.status === "failed") {
                             portraitsRef.current.delete(faceId);
