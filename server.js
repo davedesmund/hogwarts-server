@@ -7,9 +7,10 @@ const PORT = process.env.PORT || 10000;
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
+// 1. Wakeup Route
 app.get('/status/wakeup', (req, res) => res.send("Awake"));
 
-// --- PULSE CHECK ROUTE ---
+// 2. THE PULSE CHECK ROUTE (To test Segmind directly)
 app.get('/test-segmind', async (req, res) => {
     try {
         const API_KEY = process.env.SEGMIND_API_KEY?.trim();
@@ -24,12 +25,12 @@ app.get('/test-segmind', async (req, res) => {
                 'Content-Type': 'application/json' 
             },
             body: JSON.stringify({
-                // Sending a clean, public portrait from Unsplash
+                // A clean, public portrait from Unsplash
                 input_image: "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?q=80&w=512&h=512&fit=crop", 
                 driving_video: "https://segmind-sd-models.s3.amazonaws.com/liveportrait/driving_video.mp4",
                 stitch: true,
                 live_portrait_multiplier: 1.0,
-                base64: false // Tell them it is a standard URL
+                base64: false // This is FALSE here because we are using a real URL for the test
             })
         });
 
@@ -41,10 +42,10 @@ app.get('/test-segmind', async (req, res) => {
     }
 });
 
+// 3. The Main Magic Route (From the phone)
 app.post('/animate', async (req, res) => {
     try {
         const { image } = req.body;
-        // .trim() removes any accidental invisible spaces from copy/pasting
         const API_KEY = process.env.SEGMIND_API_KEY?.trim(); 
 
         if (!API_KEY) return res.status(500).json({ error: "Ministry API Key missing." });
@@ -52,9 +53,7 @@ app.post('/animate', async (req, res) => {
 
         console.log("Casting spell: Dispatching to Segmind...");
 
-        // --- THE FIX: Clean the image string so Segmind can read it ---
-        // Your phone sends "data:image/jpeg;base64,/9j/4AAQSkZJRg..."
-        // Segmind ONLY wants the "/9j/4AAQSkZJRg..." part.
+        // Clean the Base64 string so Segmind doesn't panic
         const cleanBase64 = image.replace(/^data:image\/\w+;base64,/, "");
 
         const controller = new AbortController();
@@ -68,11 +67,11 @@ app.post('/animate', async (req, res) => {
                     'Content-Type': 'application/json' 
                 },
                 body: JSON.stringify({
-                    input_image: cleanBase64, // Send the cleaned string
+                    input_image: cleanBase64, 
                     driving_video: "https://segmind-sd-models.s3.amazonaws.com/liveportrait/driving_video.mp4",
                     stitch: true,
                     live_portrait_multiplier: 1.0,
-                    base64: true // THE SMOKING GUN: Tell them it IS a base64 string!
+                    base64: true // This is TRUE because the phone sends Base64 text
                 }),
                 signal: controller.signal
             });
@@ -105,6 +104,7 @@ app.post('/animate', async (req, res) => {
     }
 });
 
+// 4. Status Polling Route
 app.get('/status/:jobId', async (req, res) => {
     try {
         const { jobId } = req.params;
