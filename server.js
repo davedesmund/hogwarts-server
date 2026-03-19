@@ -38,7 +38,7 @@ app.post('/animate', async (req, res) => {
         // ✨ THE INTERROGATION: Print exactly what the Vault says
         console.log("Vault Raw Response:", JSON.stringify(uploadData));
 
-        const portraitUrl = uploadData?.urls?.[0];
+        const portraitUrl = uploadData?.file_urls?.[0];
         
         // Define our payload variables
         let finalImagePayload = "";
