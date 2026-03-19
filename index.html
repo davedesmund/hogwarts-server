@@ -114,51 +114,48 @@
 
             const triggerMagic = async (faceId, landmarks) => {
                 portraitsRef.current.set(faceId, { status: "loading" });
-                debug("Casting Spell...");
                 setStatus("Capturing...");
 
                 try {
+                    debug("1. Setting up canvas...");
                     const captureCanvas = document.createElement('canvas');
                     const ctx = captureCanvas.getContext('2d');
                     
-                    // --- THE FIX: Full Frame, Proportional Scale ---
                     const vW = videoRef.current.videoWidth;
                     const vH = videoRef.current.videoHeight;
-                    
-                    // Scale down so the longest side is 768px (keeps upload fast)
                     const scale = 768 / Math.max(vW, vH);
-                    const finalW = vW * scale;
-                    const finalH = vH * scale;
+                    captureCanvas.width = vW * scale;
+                    captureCanvas.height = vH * scale;
 
-                    captureCanvas.width = finalW;
-                    captureCanvas.height = finalH;
-
-                    // Draw the entire frame exactly as the camera sees it
-                    ctx.drawImage(videoRef.current, 0, 0, finalW, finalH);
+                    debug("2. Drawing camera frame...");
+                    ctx.drawImage(videoRef.current, 0, 0, captureCanvas.width, captureCanvas.height);
                     
+                    debug("3. Encoding to Base64...");
                     const base64Image = captureCanvas.toDataURL('image/jpeg', 0.85);
-                    
-                    // Show the user what we are sending!
                     setPreviewImg(base64Image); 
 
+                    // This will print the first 25 characters of your URL to make sure it's right
+                    debug(`4. Fetching: ${SERVER_URL.substring(0, 25)}...`);
+                    
                     const response = await fetch(`${SERVER_URL}/animate`, { 
                         method: 'POST', 
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ image: base64Image }) 
                     });
                     
+                    debug("5. Reading Ministry response...");
                     const data = await response.json();
                     
                     if (data.videoUrl) {
                         finishMagic(faceId, data.videoUrl, landmarks);
                     } else if (data.job_id) {
-                        debug(`Job Queued: ${data.job_id}`);
+                        debug(`6. Job Queued: ${data.job_id}`);
                         pollStatus(faceId, data.job_id, landmarks);
                     } else {
                         throw new Error(data.error || "Connection Stalled");
                     }
                 } catch (e) {
-                    debug(`Magic Fail: ${e.message}`);
+                    debug(`Crash: ${e.message}`);
                     portraitsRef.current.set(faceId, { status: "failed" });
                     setStatus("Spell Fizzled");
                     
