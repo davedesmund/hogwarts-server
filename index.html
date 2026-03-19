@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Hogwarts Living Portraits</title>
+    <title>Hogwarts Living Portraits v5</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
@@ -14,12 +14,12 @@
         canvas#ar-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; transform: none !important; }
         
         .ui-layer { position: absolute; bottom: 30px; left: 0; width: 100%; display: flex; flex-direction: column; align-items: center; z-index: 10; pointer-events: none; }
-        #debug-log { position: absolute; top: 10px; left: 10px; font-family: monospace; font-size: 10px; color: #0f0; background: rgba(0,0,0,0.7); padding: 5px; z-index: 100; max-width: 60%; pointer-events: none; border-radius: 4px; border: 1px solid #050; }
+        #debug-log { position: absolute; top: 10px; left: 10px; font-family: monospace; font-size: 10px; color: #0f0; background: rgba(0,0,0,0.8); padding: 8px; z-index: 100; max-width: 70%; pointer-events: none; border-radius: 4px; border: 1px solid #050; }
         @import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700&display=swap');
     </style>
 </head>
 <body>
-    <div id="debug-log">Debug: Ready for Casting</div>
+    <div id="debug-log">Debug: v5.0 Ready</div>
     <div id="root"></div>
 
     <script type="module">
@@ -27,7 +27,7 @@
         import ReactDOM from 'https://esm.sh/react-dom@18.2.0/client';
         import { FaceLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.mjs';
 
-        // IMPORTANT: Ensure this is your exact Render URL
+        // IMPORTANT: PASTE YOUR RENDER URL HERE
         const SERVER_URL = "https://hogwarts-server.onrender.com"; 
 
         const debug = (msg) => {
@@ -36,9 +36,14 @@
             console.log(msg);
         };
 
+        // Bypassing React state for instant, lag-free UI updates
+        const updateStatus = (msg) => {
+            const el = document.getElementById('status-text');
+            if (el) el.innerText = msg;
+        };
+
         const App = () => {
             const [hasConsent, setHasConsent] = useState(false);
-            const [status, setStatus] = useState("Idle");
             const [previewImg, setPreviewImg] = useState(null); 
             
             const videoRef = useRef(null);
@@ -47,17 +52,14 @@
             const sceneRef = useRef(null);
             const portraitsRef = useRef(new Map()); 
             const requestRef = useRef();
-            
-            // ✨ NEW: Tracks how long a face has been in the frame
             const trackingRef = useRef(new Map()); 
 
             useEffect(() => { if (hasConsent) initApp(); }, [hasConsent]);
 
             const initApp = async () => {
                 try {
-                    debug("Loading Vision...");
-                    
-                    // ✨ NEW: Wake up the Render server in the background so it's ready!
+                    debug("Waking Server...");
+                    // Ping server to wake it up early
                     fetch(`${SERVER_URL}/status/wakeup`).catch(() => {});
 
                     const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm");
@@ -78,7 +80,7 @@
                         videoRef.current.play();
                         initThree();
                         requestRef.current = requestAnimationFrame(predictLoop);
-                        setStatus("Magic Active");
+                        updateStatus("Magic Active");
                         debug("Sight Online");
                     };
                 } catch (err) { debug(`Init Error: ${err.message}`); }
@@ -103,7 +105,6 @@
                 requestRef.current = requestAnimationFrame(predictLoop);
             };
 
-            // ✨ NEW: Stabilized Target Lock Logic
             const processLandmarks = (allLandmarks) => {
                 const now = performance.now();
                 const visibleFaces = new Set();
@@ -113,33 +114,28 @@
                     visibleFaces.add(faceId);
                     const width = landmarks[454].x - landmarks[234].x;
                     
-                    // Is the face large enough to scan?
                     if (width > 0.20 && !portraitsRef.current.has(faceId)) {
-                        
                         if (!trackingRef.current.has(faceId)) {
-                            // 1. We just spotted a new face. Start the timer.
                             trackingRef.current.set(faceId, now);
-                            setStatus("Targeting...");
+                            updateStatus("Targeting...");
                         } else {
-                            // 2. We are tracking it. Has it been stable for 1.5 seconds?
                             const startTime = trackingRef.current.get(faceId);
+                            // Give the user 1.5 seconds to hold the phone perfectly still
                             if (now - startTime > 1500) {
-                                // FIRE! The camera has been steady for 1.5s.
                                 trackingRef.current.delete(faceId);
                                 triggerMagic(faceId, landmarks);
                             } else {
-                                setStatus("Hold steady...");
+                                updateStatus("Hold steady...");
                             }
                         }
                     } else if (portraitsRef.current.has(faceId)) {
                         updatePortraitPosition(faceId, landmarks);
                     } else {
-                        // Face is too small, cancel the lock-on
                         trackingRef.current.delete(faceId);
+                        if (!portraitsRef.current.has(faceId)) updateStatus("Searching...");
                     }
                 });
 
-                // Clean up tracking if the face leaves the screen entirely
                 for (const key of trackingRef.current.keys()) {
                     if (!visibleFaces.has(key)) trackingRef.current.delete(key);
                 }
@@ -147,10 +143,10 @@
 
             const triggerMagic = async (faceId, landmarks) => {
                 portraitsRef.current.set(faceId, { status: "loading" });
-                setStatus("Capturing...");
+                updateStatus("Capturing...");
 
                 try {
-                    debug("1. Snapping photo...");
+                    debug("1. Snapping steady photo...");
                     const captureCanvas = document.createElement('canvas');
                     const ctx = captureCanvas.getContext('2d');
                     
@@ -162,10 +158,9 @@
 
                     ctx.drawImage(videoRef.current, 0, 0, captureCanvas.width, captureCanvas.height);
                     const base64Image = captureCanvas.toDataURL('image/jpeg', 0.85);
-                    
                     setPreviewImg(base64Image); 
 
-                    debug("2. Sending to Ministry...");
+                    debug("2. Sending... (Server may take 60s to wake up)");
                     const response = await fetch(`${SERVER_URL}/animate`, { 
                         method: 'POST', 
                         headers: { 'Content-Type': 'application/json' },
@@ -186,7 +181,7 @@
                 } catch (e) {
                     debug(`Crash: ${e.message}`);
                     portraitsRef.current.set(faceId, { status: "failed" });
-                    setStatus("Spell Fizzled");
+                    updateStatus("Spell Fizzled");
                     
                     setTimeout(() => {
                         if (portraitsRef.current.get(faceId)?.status === "failed") {
@@ -197,7 +192,7 @@
             };
 
             const pollStatus = async (faceId, jobId, landmarks) => {
-                setStatus("Manifesting...");
+                updateStatus("Manifesting...");
                 try {
                     const response = await fetch(`${SERVER_URL}/status/${jobId}`);
                     const data = await response.json();
@@ -218,7 +213,7 @@
             const finishMagic = (id, url, landmarks) => {
                 debug("Magic Bound!");
                 createPortraitMesh(id, url, landmarks);
-                setStatus("Living");
+                updateStatus("Living Portrait");
                 setPreviewImg(null); 
             };
 
@@ -265,7 +260,7 @@
 
                 React.createElement('div', { className: "ui-layer" },
                     React.createElement('div', { className: "bg-black/80 px-4 py-2 rounded border border-amber-800" },
-                        React.createElement('p', { className: "text-amber-200 text-xs tracking-widest font-bold" }, status)
+                        React.createElement('p', { id: "status-text", className: "text-amber-200 text-xs tracking-widest font-bold" }, "Idle")
                     )
                 )
             );
