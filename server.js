@@ -7,6 +7,9 @@ const PORT = process.env.PORT || 10000;
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
+// Quick wakeup ping for the frontend
+app.get('/status/wakeup', (req, res) => res.send("Awake"));
+
 app.post('/animate', async (req, res) => {
     try {
         const { image } = req.body;
@@ -17,36 +20,50 @@ app.post('/animate', async (req, res) => {
 
         console.log("Casting spell: Dispatching to Segmind...");
 
-        const response = await fetch("https://api.segmind.com/v1/live-portrait", {
-            method: 'POST',
-            headers: { 
-                'x-api-key': API_KEY, 
-                'Content-Type': 'application/json' 
-            },
-            body: JSON.stringify({
-                input_image: image,
-                // If Segmind removed this public video, it might be causing the error. 
-                driving_video: "https://segmind-sd-models.s3.amazonaws.com/liveportrait/driving_video.mp4",
-                stitch: true,
-                live_portrait_multiplier: 1.0,
-                base64: false
-            })
-        });
+        // ✨ NEW: The 45-Second Fuse
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => {
+            controller.abort();
+        }, 45000); 
 
-        const data = await response.json();
-        
-        // ✨ NEW: Print the exact response from Segmind so we can read it
-        console.log("Raw Segmind Data:", JSON.stringify(data).substring(0, 300));
+        try {
+            const response = await fetch("https://api.segmind.com/v1/live-portrait", {
+                method: 'POST',
+                headers: { 
+                    'x-api-key': API_KEY, 
+                    'Content-Type': 'application/json' 
+                },
+                body: JSON.stringify({
+                    input_image: image,
+                    driving_video: "https://segmind-sd-models.s3.amazonaws.com/liveportrait/driving_video.mp4",
+                    stitch: true,
+                    live_portrait_multiplier: 1.0,
+                    base64: false
+                }),
+                signal: controller.signal // Attach the fuse
+            });
+            
+            clearTimeout(timeoutId); // Disarm the fuse if Segmind replies in time
 
-        if (!response.ok || (!data.video_url && !data.job_id)) {
-             // Pass the EXACT error (data.error) back to the phone
-             throw new Error(data.error || data.message || "Segmind rejected the image.");
+            const data = await response.json();
+            console.log("Raw Segmind Data:", JSON.stringify(data).substring(0, 300));
+
+            if (!response.ok || (!data.video_url && !data.job_id)) {
+                 throw new Error(data.error || data.message || "Segmind rejected the image.");
+            }
+
+            res.json({
+                videoUrl: data.video_url || null,
+                job_id: data.job_id || null
+            });
+
+        } catch (fetchError) {
+            clearTimeout(timeoutId);
+            if (fetchError.name === 'AbortError') {
+                throw new Error("Segmind took too long and timed out (45s).");
+            }
+            throw fetchError;
         }
-
-        res.json({
-            videoUrl: data.video_url || null,
-            job_id: data.job_id || null
-        });
 
     } catch (err) {
         console.error("Spell Failure:", err.message);
