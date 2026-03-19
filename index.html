@@ -114,9 +114,22 @@
                     const captureCanvas = document.createElement('canvas');
                     captureCanvas.width = 512; captureCanvas.height = 512;
                     const ctx = captureCanvas.getContext('2d');
-                    ctx.drawImage(videoRef.current, 0, 0, 512, 512);
                     
-                    // JSON Handshake Strategy
+                    // --- THE FIX: Perfect Center Crop ---
+                    // Get the actual dimensions of the video feed
+                    const vW = videoRef.current.videoWidth;
+                    const vH = videoRef.current.videoHeight;
+                    
+                    // Find the smallest side to make a perfect square
+                    const minSize = Math.min(vW, vH);
+                    
+                    // Calculate the exact center
+                    const startX = (vW - minSize) / 2;
+                    const startY = (vH - minSize) / 2;
+
+                    // Draw only the perfectly proportioned center square
+                    ctx.drawImage(videoRef.current, startX, startY, minSize, minSize, 0, 0, 512, 512);
+                    
                     const base64Image = captureCanvas.toDataURL('image/jpeg', 0.85);
 
                     const response = await fetch(`${SERVER_URL}/animate`, { 
@@ -133,16 +146,13 @@
                         debug(`Job Queued: ${data.job_id}`);
                         pollStatus(faceId, data.job_id, landmarks);
                     } else {
+                        // Pass the exact error from the server to the screen
                         throw new Error(data.error || "Connection Stalled");
                     }
                 } catch (e) {
                     debug(`Magic Fail: ${e.message}`);
-                    // ✨ NEW: Mark as failed instead of deleting it immediately.
-                    // This stops the infinite spam loop.
                     portraitsRef.current.set(faceId, { status: "failed" });
                     setStatus("Spell Fizzled");
-                    
-                    // Allow trying again after 5 seconds
                     setTimeout(() => {
                         if (portraitsRef.current.get(faceId)?.status === "failed") {
                             portraitsRef.current.delete(faceId);

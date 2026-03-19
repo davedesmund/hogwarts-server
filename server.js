@@ -39,7 +39,8 @@ app.post('/animate', async (req, res) => {
         console.log("Raw Segmind Data:", JSON.stringify(data).substring(0, 300));
 
         if (!response.ok || (!data.video_url && !data.job_id)) {
-             throw new Error(data.message || "Segmind returned an invalid response.");
+             // Pass the EXACT error (data.error) back to the phone
+             throw new Error(data.error || data.message || "Segmind rejected the image.");
         }
 
         res.json({
